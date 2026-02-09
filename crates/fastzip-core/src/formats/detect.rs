@@ -11,6 +11,7 @@ use crate::error::{FastZipError, Result};
 pub enum ArchiveFormat {
     Zip,
     SevenZ,
+    Rar,  // 需启用 feature "full"
     TarGz,
     TarXz,
     TarBz2,
@@ -49,6 +50,7 @@ impl ArchiveFormat {
         match ext.as_str() {
             "zip" => Some(Self::Zip),
             "7z" => Some(Self::SevenZ),
+            "rar" if cfg!(feature = "full") => Some(Self::Rar),
             "tar" => Some(Self::Tar),
             "tgz" => Some(Self::TarGz),
             "txz" => Some(Self::TarXz),
@@ -77,6 +79,10 @@ impl ArchiveFormat {
         // 7z: 7z BC AF 27 1C
         if buf.starts_with(b"7z\xbc\xaf\x27\x1c") {
             return Some(Self::SevenZ);
+        }
+        // RAR: Rar!\x1a\x07 (v1.5+)（仅 full feature 时识别）
+        if cfg!(feature = "full") && buf.len() >= 7 && buf[0..7] == [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00] {
+            return Some(Self::Rar);
         }
         // gzip: 1f 8b
         if buf.starts_with(b"\x1f\x8b") {
@@ -109,6 +115,7 @@ impl ArchiveFormat {
             self,
             Self::Zip
                 | Self::SevenZ
+                | Self::Rar
                 | Self::Tar
                 | Self::TarGz
                 | Self::TarXz

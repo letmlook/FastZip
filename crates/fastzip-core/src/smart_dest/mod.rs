@@ -3,8 +3,17 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::formats::ArchiveFormat;
-use crate::formats::{SevenZExtractor, TarExtractor, ZipExtractor};
+use crate::formats::{detect_format, ArchiveFormat, SevenZExtractor, TarExtractor, ZipExtractor};
+
+#[cfg(feature = "unrar")]
+use crate::formats::RarExtractor;
+
+/// 列出归档顶层条目（用于预览等），返回格式与条目信息
+pub fn list_archive_top_level(path: &Path) -> Result<(ArchiveFormat, TopLevelEntries)> {
+    let format = detect_format(path)?;
+    let entries = list_top_level_entries(path, format)?;
+    Ok((format, entries))
+}
 
 /// 顶层条目信息（用于智能解压决策）
 #[derive(Debug, Clone)]
@@ -79,6 +88,8 @@ fn list_top_level_entries(path: &Path, format: ArchiveFormat) -> Result<TopLevel
     match format {
         ArchiveFormat::Zip => ZipExtractor::list_top_level(path),
         ArchiveFormat::SevenZ => SevenZExtractor::list_top_level(path),
+        #[cfg(feature = "unrar")]
+        ArchiveFormat::Rar => RarExtractor::list_top_level(path),
         ArchiveFormat::Tar | ArchiveFormat::TarGz | ArchiveFormat::TarXz | ArchiveFormat::TarBz2 | ArchiveFormat::TarZst => {
             TarExtractor::list_top_level(path, format)
         }

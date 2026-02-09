@@ -1,0 +1,15 @@
+[package]
+name = "fastzip-gui"
+version = "0.1.0"
+edition = "2021"
+description = "FastZip 图形界面：解压、压缩、预览"
+
+[[bin]]
+name = "fastzip-gui"
+path = "src/main.rs"
+
+[dependencies]
+fastzip-core = { path = "../fastzip-core" }
+eframe = "0.29"
+egui = "0.29"
+rfd = "0.15"

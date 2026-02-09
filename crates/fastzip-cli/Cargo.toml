@@ -9,6 +9,10 @@ license = "MIT"
 name = "fastzip"
 path = "src/main.rs"
 
+[features]
+default = []
+full = ["fastzip-core/full"]
+
 [dependencies]
 fastzip-core = { path = "../fastzip-core" }
 clap = { version = "4", features = ["derive"] }

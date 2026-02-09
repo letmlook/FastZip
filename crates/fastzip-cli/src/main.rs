@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use fastzip_core::{extract_many, ExtractOptions, FastZipError};
+use fastzip_core::{
+    compress_to_7z, compress_to_zip, extract_many, CompressOptions, ExtractOptions, FastZipError,
+};
 
 mod args;
 
@@ -28,10 +30,14 @@ fn main() {
 fn run() -> Result<(), FastZipError> {
     let cli = args::Cli::parse();
 
-    let extract_args = match &cli.command {
-        args::Command::Extract(a) | args::Command::X(a) => a,
-    };
+    match &cli.command {
+        args::Command::Extract(a) | args::Command::X(a) => run_extract(a),
+        args::Command::Compress(a) | args::Command::C(a) => run_compress(a),
+    }
+}
 
+
+fn run_extract(extract_args: &args::ExtractArgs) -> Result<(), FastZipError> {
     let options = ExtractOptions {
         dest: extract_args.dest.clone(),
         smart: extract_args.smart(),
@@ -95,5 +101,61 @@ fn run() -> Result<(), FastZipError> {
         p.finish_with_message("完成");
     }
 
+    Ok(())
+}
+
+fn run_compress(compress_args: &args::CompressArgs) -> Result<(), FastZipError> {
+    let output = compress_args.output.as_ref().ok_or_else(|| {
+        FastZipError::Other("压缩请指定输出文件：-o/--output <文件.zip 或 文件.7z>".into())
+    })?;
+
+    let sources: Vec<PathBuf> = compress_args
+        .sources
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| {
+            if p.exists() {
+                true
+            } else {
+                eprintln!("警告: 不存在，已跳过: {}", p.display());
+                false
+            }
+        })
+        .collect();
+
+    if sources.is_empty() {
+        return Err(FastZipError::Other("没有有效的源路径".into()));
+    }
+
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let options = CompressOptions {
+        recursive: compress_args.recursive,
+        password: None,
+        fast: !compress_args.no_fast,
+    };
+
+    if ext == "7z" {
+        if sources.len() > 1 {
+            return Err(FastZipError::Other(
+                "7z 格式仅支持单一路径，请指定一个目录或文件".into(),
+            ));
+        }
+        compress_to_7z(&sources[0], output)?;
+    } else if ext == "zip" {
+        compress_to_zip(&sources, output, &options)?;
+    } else {
+        return Err(FastZipError::Other(
+            "仅支持 .zip 或 .7z 输出，请使用 -o 指定扩展名".into(),
+        ));
+    }
+
+    if !compress_args.quiet {
+        println!("已压缩到: {}", output.display());
+    }
     Ok(())
 }

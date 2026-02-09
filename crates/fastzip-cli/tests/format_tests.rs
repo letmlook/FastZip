@@ -31,7 +31,7 @@ fn test_tar_gz_format_detection() {
 
 #[test]
 fn test_tar_gz_extract() {
-    let (_dir, path) = create_tar_gz();
+    let (dir, path) = create_tar_gz();
     let dest = dir.path().join("out");
 
     let options = ExtractOptions {

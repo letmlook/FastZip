@@ -10,6 +10,8 @@ use crate::formats::{
     detect_format, extract_single_compressed, ArchiveFormat, SevenZExtractor, TarExtractor,
     ZipExtractor,
 };
+#[cfg(feature = "unrar")]
+use crate::formats::RarExtractor;
 use crate::smart_dest::resolve_smart_dest;
 
 /// 解压选项
@@ -81,11 +83,21 @@ pub fn extract_one(archive_path: &Path, options: &ExtractOptions) -> Result<std:
         ArchiveFormat::SevenZ => {
             SevenZExtractor::extract(archive_path, &dest_dir, password)?;
         }
+        #[cfg(feature = "unrar")]
+        ArchiveFormat::Rar => {
+            RarExtractor::extract(archive_path, &dest_dir, password)?;
+        }
         ArchiveFormat::Tar | ArchiveFormat::TarGz | ArchiveFormat::TarXz | ArchiveFormat::TarBz2 | ArchiveFormat::TarZst => {
             TarExtractor::extract(archive_path, &dest_dir, format)?;
         }
         ArchiveFormat::Gz | ArchiveFormat::Xz | ArchiveFormat::Bz2 | ArchiveFormat::Zst => {
             extract_single_compressed(archive_path, &dest_dir, format, options.overwrite)?;
+        }
+        #[cfg(not(feature = "unrar"))]
+        ArchiveFormat::Rar => {
+            return Err(crate::error::FastZipError::UnsupportedFormat(
+                "RAR 格式需使用 full feature 编译".into(),
+            ));
         }
     }
 

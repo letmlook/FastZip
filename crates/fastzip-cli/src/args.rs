@@ -18,6 +18,33 @@ pub enum Command {
     Extract(ExtractArgs),
     /// 解压压缩文件（extract 的简写）
     X(ExtractArgs),
+    /// 压缩为 ZIP 或 7z
+    Compress(CompressArgs),
+    /// 压缩（compress 的简写）
+    C(CompressArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct CompressArgs {
+    /// 要压缩的文件或目录（可多个）
+    #[arg(required = true)]
+    pub sources: Vec<String>,
+
+    /// 输出压缩包路径（.zip 或 .7z）
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// 递归包含子目录
+    #[arg(short, long, default_value_t = true)]
+    pub recursive: bool,
+
+    /// 启用 Deflate 压缩（较慢，体积更小；默认仅存储不压缩）
+    #[arg(long)]
+    pub no_fast: bool,
+
+    /// 静默模式
+    #[arg(short, long)]
+    pub quiet: bool,
 }
 
 #[derive(Parser, Debug)]
