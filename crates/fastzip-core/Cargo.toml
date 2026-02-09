@@ -1,0 +1,30 @@
+[package]
+name = "fastzip-core"
+version = "0.1.0"
+edition = "2021"
+description = "FastZip 核心库：解压引擎、智能解压、格式适配"
+license = "MIT"
+
+[dependencies]
+# 格式支持
+zip = "2"
+sevenz-rust = { version = "0.6", features = ["aes256"] }
+tar = "0.4"
+flate2 = "1.0"
+xz2 = "0.1"
+bzip2 = "0.4"
+zstd = "0.13"
+
+# 工具
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+rayon = "1.10"
+
+[dev-dependencies]
+tempfile = "3"
+zip = "2"
+
+[features]
+default = []
+full = []  # 预留：RAR 等全格式

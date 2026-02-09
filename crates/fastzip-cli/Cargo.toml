@@ -1,0 +1,23 @@
+[package]
+name = "fastzip"
+version = "0.1.0"
+edition = "2021"
+description = "跨平台快速解压缩工具"
+license = "MIT"
+
+[[bin]]
+name = "fastzip"
+path = "src/main.rs"
+
+[dependencies]
+fastzip-core = { path = "../fastzip-core" }
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"
+console = "0.15"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+zip = "2"
+tar = "0.4"
+flate2 = "1.0"
