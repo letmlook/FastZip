@@ -25,8 +25,15 @@ cargo install --path crates/fastzip-cli --features full
 ### 方式二：从源码构建
 
 ```bash
-cargo build -p fastzip --release
-# 可执行文件位于 target/release/fastzip
+cargo build -p fastzip-cli --release
+# 可执行文件位于 target/release/fastzip-cli
+```
+
+**若编译时电脑卡顿**，项目已配置限流（`.cargo/config.toml`），或使用低资源脚本：
+
+```powershell
+# Windows
+.\scripts\build-low.ps1 build -p fastzip-cli --release
 ```
 
 ### 方式三：平台 Shell 集成（右键菜单）
@@ -84,28 +91,50 @@ fastzip compress mydir -o archive.7z
 
 ## 图形界面（GUI）
 
-除 CLI 外，可运行图形界面进行解压与压缩：
+GUI 采用 **Leptos + Tauri** 实现（基于 [rust-ui.com](https://rust-ui.com) 生态，Leptos 组件库 + Tailwind 风格）。
+
+### 环境要求
+
+- Rust（含 `wasm32-unknown-unknown` 目标）
+- [Trunk](https://trunkrs.dev/)（`cargo install trunk`）
+- [Tauri CLI](https://tauri.app/)（`cargo install tauri-cli`）
+
+### 构建与运行
 
 ```bash
-cargo run -p fastzip-gui
-# 或安装后
-cargo install --path crates/fastzip-gui
-fastzip-gui
+cd crates/fastzip-gui
+cargo tauri dev    # 开发模式（热重载）
+cargo tauri build  # 生产构建
 ```
 
 - **解压**：选择压缩包 → 选择目标目录 → 可选智能解压/密码 → 预览顶层条目 → 解压
 - **压缩**：添加文件或目录 → 指定输出 .zip 或 .7z → 压缩
+
+### 添加 rust-ui 组件（可选）
+
+安装 `ui-cli` 后可使用 [rust-ui.com](https://rust-ui.com) 组件库：
+
+```bash
+cargo install ui-cli --force
+cd crates/fastzip-gui
+ui add button card tabs   # 示例：添加按钮、卡片、标签页组件
+```
 
 ## 项目结构
 
 ```
 FastZip/
 ├── crates/
-│   ├── fastzip-core/   # 核心库：解压引擎、智能解压、格式适配、压缩
-│   ├── fastzip-cli/    # 命令行工具
-│   └── fastzip-gui/    # 图形界面（eframe/egui）
-├── DESIGN.md           # 设计方案
-└── DEVELOPMENT_PLAN.md # 开发计划
+│   ├── fastzip-core/        # 核心库：解压引擎、智能解压、格式适配、压缩
+│   ├── fastzip-cli/         # 命令行工具
+│   └── fastzip-gui/         # 图形界面（Leptos + Tauri）
+│       ├── src/             # Leptos 前端 (WASM)
+│       ├── src-tauri/       # Tauri 后端
+│       ├── style/           # 样式 (rust-ui 风格)
+│       ├── index.html       # Trunk 入口
+│       └── Trunk.toml
+├── DESIGN.md
+└── DEVELOPMENT_PLAN.md
 ```
 
 ## 开发状态

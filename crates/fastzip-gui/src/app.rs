@@ -1,381 +1,310 @@
-//! 主界面逻辑与状态
+//! FastZip 主界面 - Leptos + rust-ui 风格
 
-use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::thread;
+use leptos::*;
+use tauri::invoke;
 
-use eframe::egui;
-use fastzip_core::{compress_to_7z, compress_to_zip, extract_one, CompressOptions, ExtractOptions};
+#[component]
+pub fn App() -> impl IntoView {
+    let (tab, set_tab) = signal(false); // false = 解压, true = 压缩
+    let (archive_path, set_archive_path) = signal(String::new());
+    let (dest_path, set_dest_path) = signal(String::new());
+    let (smart_extract, set_smart_extract) = signal(true);
+    let (password, set_password) = signal(String::new());
+    let (preview_format, set_preview_format) = signal(String::new());
+    let (preview_entries, set_preview_entries) = signal(Vec::<String>::new());
 
-use crate::archive_preview;
+    let (compress_sources, set_compress_sources) = signal(Vec::<String>::new());
+    let (compress_dest, set_compress_dest) = signal(String::new());
+    let (compress_recursive, set_compress_recursive) = signal(true);
+    let (compress_format_zip, set_compress_format_zip) = signal(true);
 
-/// 界面模式
-#[derive(Default, PartialEq)]
-enum Tab {
-    #[default]
-    Extract,
-    Compress,
-}
+    let (status, set_status) = signal(String::new());
+    let (error, set_error) = signal(String::new());
+    let (running, set_running) = signal(false);
 
-/// 任务结果
-enum TaskResult {
-    Extract(Result<PathBuf, String>),
-    Compress(Result<(), String>),
-}
+    let on_pick_file = move |_| {
+        spawn_local(async move {
+            if let Ok(Some(p)) = invoke::<_, Option<String>>("pick_file", ()).await {
+                set_archive_path.set(p.clone());
+                set_error.set(String::new());
+                if let Ok(Ok((fmt, entries))) =
+                    invoke::<_, Result<(String, Vec<String>), String>>("list_archive", (p,)).await
+                {
+                    set_preview_format.set(fmt);
+                    set_preview_entries.set(entries);
+                }
+            }
+        });
+    };
 
-pub struct FastZipApp {
-    tab: Tab,
+    let on_pick_folder = move |_| {
+        spawn_local(async move {
+            if let Ok(Some(p)) = invoke::<_, Option<String>>("pick_folder", ()).await {
+                set_dest_path.set(p);
+            }
+        });
+    };
 
-    // 解压
-    archive_path: String,
-    dest_path: String,
-    smart_extract: bool,
-    password: String,
-    preview_entries: Vec<String>,
-    preview_format: String,
+    let on_pick_files = move |_| {
+        spawn_local(async move {
+            if let Ok(Some(files)) = invoke::<_, Option<Vec<String>>>("pick_files", ()).await {
+                set_compress_sources.update(|v| v.extend(files));
+            }
+        });
+    };
 
-    // 压缩
-    compress_sources: Vec<PathBuf>,
-    compress_dest: String,
-    compress_recursive: bool,
-    compress_format_zip: bool,
+    let on_save_file = move |_| {
+        spawn_local(async move {
+            if let Ok(Some(p)) = invoke::<_, Option<String>>("save_file", ()).await {
+                set_compress_dest.set(p.clone());
+                set_compress_format_zip
+                    .set(p.to_lowercase().ends_with(".zip"));
+            }
+        });
+    };
 
-    status: String,
-    error: String,
-    running: bool,
-    rx: Option<mpsc::Receiver<TaskResult>>,
-}
+    let remove_source = move |i: usize| {
+        set_compress_sources.update(|v| {
+            v.remove(i);
+        });
+    };
 
-impl Default for FastZipApp {
-    fn default() -> Self {
-        Self {
-            tab: Tab::Extract,
-            archive_path: String::new(),
-            dest_path: String::new(),
-            smart_extract: true,
-            password: String::new(),
-            preview_entries: Vec::new(),
-            preview_format: String::new(),
-            compress_sources: Vec::new(),
-            compress_dest: String::new(),
-            compress_recursive: true,
-            compress_format_zip: true,
-            status: String::new(),
-            error: String::new(),
-            running: false,
-            rx: None,
-        }
-    }
-}
-
-impl FastZipApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::default()
-    }
-
-    fn poll_result(&mut self) {
-        if !self.running {
+    let on_extract = move |_| {
+        let archive = archive_path.get();
+        let dest = dest_path.get();
+        if archive.is_empty() || dest.is_empty() {
+            set_error.set("请选择压缩包和目标目录".to_string());
             return;
         }
-        let rx = match &self.rx {
-            Some(r) => r,
-            None => return,
-        };
-        match rx.try_recv() {
-            Ok(TaskResult::Extract(Ok(dest))) => {
-                self.status = format!("已解压到: {}", dest.display());
-                self.error.clear();
-                self.running = false;
-                self.rx = None;
-            }
-            Ok(TaskResult::Extract(Err(e))) => {
-                self.error = e;
-                self.status.clear();
-                self.running = false;
-                self.rx = None;
-            }
-            Ok(TaskResult::Compress(Ok(()))) => {
-                self.status = "压缩完成".to_string();
-                self.error.clear();
-                self.running = false;
-                self.rx = None;
-            }
-            Ok(TaskResult::Compress(Err(e))) => {
-                self.error = e;
-                self.status.clear();
-                self.running = false;
-                self.rx = None;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.running = false;
-                self.rx = None;
-            }
-        }
-    }
-
-    fn start_extract(&mut self) {
-        if self.archive_path.is_empty() || self.dest_path.is_empty() {
-            self.error = "请选择压缩包和目标目录".to_string();
-            return;
-        }
-        let archive = PathBuf::from(&self.archive_path);
-        let dest = PathBuf::from(&self.dest_path);
-        if !archive.exists() {
-            self.error = "压缩包不存在".to_string();
-            return;
-        }
-        let smart = self.smart_extract;
-        let password = if self.password.is_empty() {
+        set_running.set(true);
+        set_error.set(String::new());
+        set_status.set("正在解压...".to_string());
+        let pw = if password.get().is_empty() {
             None
         } else {
-            Some(self.password.clone())
+            Some(password.get())
         };
-        let (tx, rx) = mpsc::channel();
-        self.rx = Some(rx);
-        self.running = true;
-        self.error.clear();
-        self.status = "正在解压...".to_string();
-        thread::spawn(move || {
-            let opts = ExtractOptions {
-                dest: Some(dest.clone()),
-                smart,
-                overwrite: false,
-                password,
-            };
-            let result = extract_one(&archive, &opts).map_err(|e| e.to_string());
-            let _ = tx.send(TaskResult::Extract(result));
+        spawn_local(async move {
+            let result: Result<String, String> = invoke(
+                "extract",
+                (archive, dest, smart_extract.get(), pw),
+            )
+            .await;
+            set_running.set(false);
+            match result {
+                Ok(path) => {
+                    set_status.set(format!("已解压到: {}", path));
+                    set_error.set(String::new());
+                }
+                Err(e) => {
+                    set_error.set(e);
+                    set_status.set(String::new());
+                }
+            }
         });
-    }
+    };
 
-    fn start_compress(&mut self) {
-        if self.compress_sources.is_empty() || self.compress_dest.is_empty() {
-            self.error = "请添加要压缩的文件并指定输出路径".to_string();
+    let on_compress = move |_| {
+        let sources = compress_sources.get();
+        let dest = compress_dest.get();
+        if sources.is_empty() || dest.is_empty() {
+            set_error.set("请添加要压缩的文件并指定输出路径".to_string());
             return;
         }
-        let dest = PathBuf::from(&self.compress_dest);
-        let (tx, rx) = mpsc::channel();
-        self.rx = Some(rx);
-        self.running = true;
-        self.error.clear();
-        self.status = "正在压缩...".to_string();
-        let sources = self.compress_sources.clone();
-        let recursive = self.compress_recursive;
-        let is_zip = self.compress_format_zip;
-        thread::spawn(move || {
-            let result = if is_zip {
-                compress_to_zip(&sources, &dest, &CompressOptions { recursive, password: None, fast: true })
-                    .map_err(|e| e.to_string())
-            } else {
-                if sources.len() > 1 {
-                    let _ = tx.send(TaskResult::Compress(Err(
-                        "7z 仅支持单一路径".to_string(),
-                    )));
-                    return;
+        set_running.set(true);
+        set_error.set(String::new());
+        set_status.set("正在压缩...".to_string());
+        spawn_local(async move {
+            let result: Result<(), String> = invoke(
+                "compress",
+                (sources, dest, compress_format_zip.get(), compress_recursive.get()),
+            )
+            .await;
+            set_running.set(false);
+            match result {
+                Ok(()) => {
+                    set_status.set("压缩完成".to_string());
+                    set_error.set(String::new());
                 }
-                compress_to_7z(&sources[0], &dest).map_err(|e| e.to_string())
-            };
-            let _ = tx.send(TaskResult::Compress(result));
-        });
-    }
-
-    fn load_preview(&mut self) {
-        if self.archive_path.is_empty() {
-            return;
-        }
-        let path = Path::new(&self.archive_path);
-        match archive_preview::list_top_level(path) {
-            Ok((format_name, entries)) => {
-                self.preview_format = format_name;
-                self.preview_entries = entries;
-                self.error.clear();
-            }
-            Err(e) => {
-                self.error = format!("{}", e);
-                self.preview_entries.clear();
-                self.preview_format.clear();
-            }
-        }
-    }
-}
-
-impl eframe::App for FastZipApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_result();
-
-        egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Extract, "解压");
-                ui.selectable_value(&mut self.tab, Tab::Compress, "压缩");
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match self.tab {
-                Tab::Extract => self.ui_extract(ui),
-                Tab::Compress => self.ui_compress(ui),
+                Err(e) => {
+                    set_error.set(e);
+                    set_status.set(String::new());
+                }
             }
         });
+    };
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if self.running {
-                    ui.spinner();
-                    ui.label(&self.status);
-                } else if !self.status.is_empty() {
-                    ui.label(egui::RichText::new(&self.status).color(egui::Color32::GREEN));
-                }
-                if !self.error.is_empty() {
-                    ui.label(egui::RichText::new(&self.error).color(egui::Color32::RED));
-                }
-            });
-        });
-    }
-}
+    view! {
+        <div class="app">
+            <header class="header">
+                <button
+                    class=move || if !tab.get() { "tab active" } else { "tab" }
+                    on:click=move |_| set_tab.set(false)
+                >
+                    "解压"
+                </button>
+                <button
+                    class=move || if tab.get() { "tab active" } else { "tab" }
+                    on:click=move |_| set_tab.set(true)
+                >
+                    "压缩"
+                </button>
+            </header>
 
-impl FastZipApp {
-    fn ui_extract(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(12.0);
-            ui.heading("解压压缩包");
-            ui.add_space(8.0);
-
-            ui.horizontal(|ui| {
-                ui.label("压缩包:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.archive_path)
-                        .desired_width(320.0)
-                        .hint_text("路径或点击浏览"),
-                );
-                if ui.button("浏览…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().pick_file() {
-                        self.archive_path = p.to_string_lossy().to_string();
-                        self.load_preview();
+            <main class="main">
+                <Show
+                    when=move || !tab.get()
+                    fallback=|| view! {
+                        <div class="panel">
+                                <h2>"压缩文件/目录"</h2>
+                                <button class="btn secondary" on:click=on_pick_files>"添加文件或目录…"</button>
+                                <Show when=move || !compress_sources.get().is_empty() fallback=|| ()>
+                                    {move || view! {
+                                        <div class="scroll-entries sources">
+                                            {compress_sources.get().iter().enumerate().map(|(i, p)| view! {
+                                                <div class="row entry-row">
+                                                    <span class="path">{p.clone()}</span>
+                                                    <button class="btn small" on:click=move |_| remove_source(i)>"移除"</button>
+                                                </div>
+                                            }).collect_view()}
+                                        </div>
+                                    }}
+                                </Show>
+                                <div class="row">
+                                    <label>"输出路径:"</label>
+                                    <input
+                                        type="text"
+                                        prop:value=move || compress_dest.get()
+                                        readonly=true
+                                        placeholder=".zip 或 .7z 文件路径"
+                                    />
+                                    <button class="btn secondary" on:click=on_save_file>"另存为…"</button>
+                                </div>
+                                <div class="row">
+                                    <label class="checkbox">
+                                        <input
+                                            type="checkbox"
+                                            prop:checked=move || compress_format_zip.get()
+                                            on:change=move |ev| set_compress_format_zip.set(event_target_checked(&ev))
+                                        />
+                                        "ZIP 格式（否则 7z）"
+                                    </label>
+                                    <label class="checkbox">
+                                        <input
+                                            type="checkbox"
+                                            prop:checked=move || compress_recursive.get()
+                                            on:change=move |ev| set_compress_recursive.set(event_target_checked(&ev))
+                                        />
+                                        "递归子目录"
+                                    </label>
+                                </div>
+                                <div class="row actions">
+                                    <button
+                                        class="btn primary"
+                                        disabled=move || running.get() || compress_sources.get().is_empty() || compress_dest.get().is_empty()
+                                        on:click=on_compress
+                                    >
+                                        {move || if running.get() { "压缩中…" } else { "压缩" }}
+                                    </button>
+                                </div>
+                            </div>
                     }
-                }
-            });
+                >
+                    <div class="panel">
+                        <h2>"解压压缩包"</h2>
+                                <div class="row">
+                                    <label>"压缩包:"</label>
+                                    <input
+                                        type="text"
+                                        prop:value=move || archive_path.get()
+                                        placeholder="路径或点击浏览"
+                                        readonly=true
+                                    />
+                                    <button class="btn secondary" on:click=on_pick_file>"浏览…"</button>
+                                </div>
+                                <div class="row">
+                                    <label>"目标目录:"</label>
+                                    <input
+                                        type="text"
+                                        prop:value=move || dest_path.get()
+                                        placeholder="解压到此目录"
+                                        readonly=true
+                                    />
+                                    <button class="btn secondary" on:click=on_pick_folder>"浏览…"</button>
+                                </div>
+                                <div class="row">
+                                    <label class="checkbox">
+                                        <input
+                                            type="checkbox"
+                                            prop:checked=move || smart_extract.get()
+                                            on:change=move |ev| set_smart_extract.set(event_target_checked(&ev))
+                                        />
+                                        "智能解压（根据内容自动选择子目录）"
+                                    </label>
+                                </div>
+                                <div class="row">
+                                    <label>"密码:"</label>
+                                    <input
+                                        type="password"
+                                        prop:value=move || password.get()
+                                        on:input=move |ev| set_password.set(event_target_value(&ev))
+                                        placeholder="可选"
+                                    />
+                                </div>
+                                <Show
+                                    when=move || !preview_format.get().is_empty()
+                                    fallback=|| ()
+                                >
+                                    {move || {
+                                        let fmt = preview_format.get();
+                                        let entries = preview_entries.get();
+                                        view! {
+                                            <div class="preview">
+                                                <p class="small">"格式: " {fmt}</p>
+                                                <div class="scroll-entries">
+                                                    {entries.iter().take(50).map(|n| view! {
+                                                        <div class="entry">{n.clone()}</div>
+                                                    }).collect_view()}
+                                                    <Show when=move || entries.len() > 50 fallback=|| ()>
+                                                        <div class="entry">"..."</div>
+                                                    </Show>
+                                                </div>
+                                            </div>
+                                        }
+                                    }}
+                                </Show>
+                                <div class="row actions">
+                                    <button
+                                        class="btn primary"
+                                        disabled=move || running.get() || archive_path.get().is_empty() || dest_path.get().is_empty()
+                                        on:click=on_extract
+                                    >
+                                        {move || if running.get() { "解压中…" } else { "解压" }}
+                                    </button>
+                                </div>
+                            </div>
+                </Show>
+            </main>
 
-            ui.horizontal(|ui| {
-                ui.label("目标目录:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.dest_path)
-                        .desired_width(320.0)
-                        .hint_text("解压到此目录"),
-                );
-                if ui.button("浏览…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                        self.dest_path = p.to_string_lossy().to_string();
+            <footer class="footer">
+                {move || {
+                    let s = status.get();
+                    let e = error.get();
+                    view! {
+                        <>
+                            <Show when=move || running.get() fallback=|| ()>
+                                <span class="status running">"⏳ " {s}</span>
+                            </Show>
+                            <Show when=move || !running.get() && !s.is_empty() fallback=|| ()>
+                                <span class="status ok">{s}</span>
+                            </Show>
+                            <Show when=move || !e.is_empty() fallback=|| ()>
+                                <span class="status err">{e}</span>
+                            </Show>
+                        </>
                     }
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.smart_extract, "智能解压（根据内容自动选择子目录）");
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("密码:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.password)
-                        .desired_width(180.0)
-                        .password(true)
-                        .hint_text("可选"),
-                );
-            });
-
-            if !self.preview_format.is_empty() {
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new(format!("格式: {}", self.preview_format)).small());
-                if !self.preview_entries.is_empty() {
-                    egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                        for name in self.preview_entries.iter().take(50) {
-                            ui.label(egui::RichText::new(name).small());
-                        }
-                        if self.preview_entries.len() > 50 {
-                            ui.label(egui::RichText::new("...").small());
-                        }
-                    });
-                }
-            }
-
-            ui.add_space(12.0);
-            let can_extract = !self.running && !self.archive_path.is_empty() && !self.dest_path.is_empty();
-            if ui
-                .add_enabled(can_extract, egui::Button::new("解压"))
-                .clicked()
-            {
-                self.start_extract();
-            }
-        });
-    }
-
-    fn ui_compress(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(12.0);
-            ui.heading("压缩文件/目录");
-            ui.add_space(8.0);
-
-            if ui.button("添加文件或目录…").clicked() {
-                let files = rfd::FileDialog::new().pick_files();
-                if let Some(f) = files {
-                    self.compress_sources.extend(f);
-                }
-            }
-
-            if !self.compress_sources.is_empty() {
-                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
-                    let mut to_remove = None;
-                    for (i, p) in self.compress_sources.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(p.display().to_string());
-                            if ui.small_button("移除").clicked() {
-                                to_remove = Some(i);
-                            }
-                        });
-                    }
-                    if let Some(i) = to_remove {
-                        self.compress_sources.remove(i);
-                    }
-                });
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("输出路径:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.compress_dest)
-                        .desired_width(280.0)
-                        .hint_text(".zip 或 .7z 文件路径"),
-                );
-                if ui.button("另存为…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("ZIP", &["zip"])
-                        .add_filter("7z", &["7z"])
-                        .save_file()
-                    {
-                        self.compress_dest = p.to_string_lossy().to_string();
-                        self.compress_format_zip = p
-                            .extension()
-                            .map(|e| e.eq_ignore_ascii_case("zip"))
-                            .unwrap_or(true);
-                    }
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.compress_format_zip, "ZIP 格式（否则 7z）");
-                ui.checkbox(&mut self.compress_recursive, "递归子目录");
-            });
-
-            ui.add_space(12.0);
-            let can_compress = !self.running
-                && !self.compress_sources.is_empty()
-                && !self.compress_dest.is_empty();
-            if ui
-                .add_enabled(can_compress, egui::Button::new("压缩"))
-                .clicked()
-            {
-                self.start_compress();
-            }
-        });
+                }}
+            </footer>
+        </div>
     }
 }

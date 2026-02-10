@@ -2,14 +2,14 @@
 name = "fastzip-gui"
 version = "0.1.0"
 edition = "2021"
-description = "FastZip 图形界面：解压、压缩、预览"
+description = "FastZip 图形界面 (Leptos + Tauri)"
 
-[[bin]]
-name = "fastzip-gui"
-path = "src/main.rs"
+[lib]
+name = "fastzip_gui"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fastzip-core = { path = "../fastzip-core" }
-eframe = "0.29"
-egui = "0.29"
-rfd = "0.15"
+leptos = { version = "0.6", features = ["csr"] }
+tauri = { version = "2" }
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"
