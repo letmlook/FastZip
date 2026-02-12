@@ -63,7 +63,12 @@ pub fn compress_to_zip<P: AsRef<Path>>(
                 }
             }
         } else {
-            let dir_name = src.file_name().unwrap_or_default().to_string_lossy().to_string() + "/";
+            let dir_name = src
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+                + "/";
             zip.add_directory(dir_name, opts)?;
         }
     }
@@ -73,12 +78,14 @@ pub fn compress_to_zip<P: AsRef<Path>>(
 }
 
 fn zip_file_options(fast: bool) -> SimpleFileOptions {
-    if fast {
+    let opts = if fast {
         // 仅存储不压缩，速度接近纯拷贝，体积等于原文件之和
         SimpleFileOptions::default().compression_method(CompressionMethod::Stored)
     } else {
         SimpleFileOptions::default()
-    }
+    };
+    // 启用 ZIP64 支持大文件（> 4GB）
+    opts.large_file(true)
 }
 
 fn add_file_to_zip<W: Write + std::io::Seek>(
@@ -100,7 +107,6 @@ pub fn compress_to_7z<P: AsRef<Path>>(source: P, dest: &Path) -> Result<()> {
     if !src.exists() {
         return Err(FastZipError::FileNotFound(src.to_path_buf()));
     }
-    sevenz_rust::compress_to_path(src, dest)
-        .map_err(|e| FastZipError::SevenZ(e.to_string()))?;
+    sevenz_rust::compress_to_path(src, dest).map_err(|e| FastZipError::SevenZ(e.to_string()))?;
     Ok(())
 }
