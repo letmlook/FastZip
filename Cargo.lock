@@ -1398,8 +1398,11 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "leptos",
- "tauri",
+ "serde",
+ "serde-wasm-bindgen",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
