@@ -7,23 +7,28 @@ use fastzip_core::{
     CompressOptions, ExtractOptions,
 };
 use tauri::command;
-use tauri::Manager;
 
 #[command]
 fn pick_file() -> Option<String> {
-    rfd::FileDialog::new().pick_file().map(|p| p.to_string_lossy().to_string())
+    rfd::FileDialog::new()
+        .pick_file()
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[command]
 fn pick_folder() -> Option<String> {
-    rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().to_string())
+    rfd::FileDialog::new()
+        .pick_folder()
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[command]
 fn pick_files() -> Option<Vec<String>> {
-    rfd::FileDialog::new()
-        .pick_files()
-        .map(|v| v.into_iter().map(|p| p.to_string_lossy().to_string()).collect())
+    rfd::FileDialog::new().pick_files().map(|v| {
+        v.into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect()
+    })
 }
 
 #[command]
